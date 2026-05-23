@@ -35,6 +35,12 @@
         <div class="mesas-container">
           <div class="grid-items">
             <div class="mesa-card" v-for="mesa in listamesas" :key="mesa.id" :class="mesa.estado">
+              
+              <div class="admin-mesa-acciones" v-if="mesa.estado === 'disponible'">
+                <button @click="editarMesa(mesa.id)" class="btn-mini-accion" title="Editar Mesa">⚙️</button>
+                <button @click="eliminarMesa(mesa.id)" class="btn-mini-accion btn-mini-eliminar" title="Eliminar Mesa">🗑️</button>
+              </div>
+
               <div class="mesa-header-info">
                 <h2>Mesa {{ mesa.numero }}</h2>
                 <span class="badge">{{ mesa.estado.toUpperCase() }}</span>
@@ -188,13 +194,15 @@ const mensajeErrorPedido = ref('')
 // --- MODALES ---
 const mostrarModal = ref(false)
 const tipoFormulario = ref('producto')
-const idEditando = ref(-1)
+const idEditando = ref(-1) // Guarda el índice del elemento que se edita en su respectivo array
 
 const formProducto = ref({ id: '', nombre: '', precio: '', cantidad: '' })
 const formMesa = ref({ numero: '' })
 
 const tituloModal = computed(() => {
-  if (tipoFormulario.value === 'mesa') return "NUEVA MESA"
+  if (tipoFormulario.value === 'mesa') {
+    return idEditando.value === -1 ? "NUEVA MESA" : "EDITAR MESA"
+  }
   return idEditando.value === -1 ? "AGREGAR PRODUCTO" : "EDITAR PRODUCTO"
 })
 
@@ -216,7 +224,6 @@ const guardarFormulario = () => {
   mensajeErrorModal.value = ''
   
   if (tipoFormulario.value === 'producto') {
-    // Validar campos vacíos del producto
     if (!formProducto.value.id || !formProducto.value.nombre || !formProducto.value.precio || formProducto.value.cantidad === '') {
       mensajeErrorModal.value = 'Todos los campos son obligatorios.'
       return
@@ -227,7 +234,6 @@ const guardarFormulario = () => {
     }
 
     if (idEditando.value === -1) {
-      // Validar ID duplicado al crear un nuevo producto
       const existeId = listaproductos.value.some(p => p.id === formProducto.value.id)
       if (existeId) {
         mensajeErrorModal.value = 'El ID ingresado ya pertenece a otro producto.'
@@ -237,19 +243,25 @@ const guardarFormulario = () => {
     } else {
       listaproductos.value[idEditando.value] = { ...formProducto.value }
     }
+    
   } else if (tipoFormulario.value === 'mesa') {
-    // Validar campos vacíos de la mesa
     if (!formMesa.value.numero || formMesa.value.numero.toString().trim() === '') {
       mensajeErrorModal.value = 'El nombre o número de la mesa es requerido.'
       return
     }
-    
-    listamesas.value.push({
-      id: Date.now(),
-      numero: formMesa.value.numero,
-      estado: 'disponible',
-      pedidos: []
-    })
+
+    if (idEditando.value === -1) {
+      // Crear nueva mesa
+      listamesas.value.push({
+        id: Date.now(),
+        numero: formMesa.value.numero,
+        estado: 'disponible',
+        pedidos: []
+      })
+    } else {
+      // Actualizar mesa existente conservando sus propiedades intactas
+      listamesas.value[idEditando.value].numero = formMesa.value.numero
+    }
   }
   
   actualizarLocalStorage()
@@ -271,7 +283,22 @@ const eliminarProducto = (prodId) => {
   actualizarLocalStorage()
 }
 
-// --- MESAS Y PEDIDOS ---
+// --- MESAS ACCIONES NUEVAS (EDITAR Y ELIMINAR) ---
+const editarMesa = (mesaId) => {
+  const index = listamesas.value.findIndex(m => m.id === mesaId)
+  if (index !== -1) {
+    formMesa.value = { numero: listamesas.value[index].numero }
+    idEditando.value = index
+    abrirModalForm('mesa')
+  }
+}
+
+const eliminarMesa = (mesaId) => {
+  listamesas.value = listamesas.value.filter(m => m.id !== mesaId)
+  actualizarLocalStorage()
+}
+
+// --- MANEJO DE PEDIDOS Y APERTURA ---
 const mostrarModalPedido = ref(false)
 const mesaSeleccionada = ref(null)
 const pedidoTemporal = ref({ productoId: '', cantidad: 1 })
@@ -283,8 +310,6 @@ const abrirMesa = (mesaId) => {
     actualizarLocalStorage()
   }
 }
-
-const tabularMesaError = ref(false) // Auxiliar visual
 
 const prepararAgregarPedido = (mesaId) => {
   mesaSeleccionada.value = listamesas.value.find(m => m.id === mesaId)
@@ -484,6 +509,7 @@ const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.sli
   flex-direction: column; 
   justify-content: space-between;
   gap: 12px;
+  position: relative;
 }
 
 .producto-info h1 { font-size: 1.25rem; color: #222; margin: 4px 0; }
@@ -495,10 +521,39 @@ const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.sli
 .mesa-card.disponible { border-top-color: #28a745; }
 .mesa-card.ocupada { border-top-color: #dc3545; }
 
+/* ACCIONES DE ADMINISTRACIÓN EN LA TARJETA DE LA MESA */
+.admin-mesa-acciones {
+  position: absolute;
+  top: -18px;
+  right: 10px;
+  display: flex;
+  gap: 4px;
+  z-index: 5;
+}
+.btn-mini-accion {
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  transition: transform 0.1s ease;
+}
+.btn-mini-accion:hover {
+  transform: scale(1.1);
+  background: #f0f0f0;
+}
+.btn-mini-eliminar:hover {
+  background: #ffebee;
+  border-color: #f5c6cb;
+}
+
 .mesa-header-info {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-top: 5px; /* Margen para no chocar con los botones mini */
 }
 .mesa-header-info h2 { font-size: 1.2rem; }
 
