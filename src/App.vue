@@ -1,245 +1,588 @@
 <template>
   <div class="caja">
-    <div class="logo"><img :src="logo" alt="" id="pri_logo"></div>
-    <button>PRODUCTOS</button>
-    <button>MESAS</button>
-    <button>FACTURAS</button>
+    <div class="logo"><img :src="logo" alt="Logo" id="pri_logo"></div>
+    <div class="menu-botones">
+      <button @click="irASlide(0)">PRODUCTOS</button>
+      <button @click="irASlide(1)">MESAS</button>
+      <button @click="irASlide(2)">FACTURAS</button>
+    </div>
   </div>
 
   <div class="main">
     <swiper :slides-per-view="1" :space-between="0" @swiper="onSwiper" class="my-swiper">
+      
       <swiper-slide id="pro">
         <div class="productos">
-          <div class="producto" v-for="item in listaproductos">
-            <h3>id</h3>
-            <h1>{{ item.id }}</h1>
-            <h3>nombre</h3>
-            <h1>{{ item.nombre }}</h1>
-            <h3>cantidad</h3>
-            <h1>{{ item.cantidad }}</h1>
-            <h3>precio</h3>
-            <h1>{{ item.precio }}</h1>
-            <button @click="editar(item.id)">editar</button>
-            <button @click="eliminar(item.id)">eliminar</button>
+          <div class="grid-items">
+            <div class="producto" v-for="item in listaproductos" :key="item.id">
+              <div class="producto-info">
+                <h3>ID: {{ item.id }}</h3>
+                <h1>{{ item.nombre }}</h1>
+                <p>Precio: ${{ item.precio }}</p>
+                <p>Stock: {{ item.cantidad }} u.</p>
+              </div>
+              <div class="acciones">
+                <button @click="editarProducto(item.id)" class="btn-editar">Editar</button>
+                <button @click="eliminarProducto(item.id)" class="btn-eliminar">Eliminar</button>
+              </div>
+            </div>
           </div>
-          <button class="add_producto" @click="abrirmodal">AGREGAR PRODUCTO</button>
+          <button class="add_btn_flotante" @click="abrirModalForm('producto')">+ PRODUCTO</button>
         </div>
       </swiper-slide>
 
       <swiper-slide>
-        <div class="section mesas">
-          <h2>Control de Mesas</h2>
+        <div class="mesas-container">
+          <div class="grid-items">
+            <div class="mesa-card" v-for="mesa in listamesas" :key="mesa.id" :class="mesa.estado">
+              <div class="mesa-header-info">
+                <h2>Mesa {{ mesa.numero }}</h2>
+                <span class="badge">{{ mesa.estado.toUpperCase() }}</span>
+              </div>
+              
+              <div class="pedido-detalle" v-if="mesa.pedidos.length > 0">
+                <h4>Consumo:</h4>
+                <ul>
+                  <li v-for="p in mesa.pedidos" :key="p.id">
+                    {{ p.nombre }} x{{ p.cantidadPedida }} (${{ p.precio * p.cantidadPedida }})
+                  </li>
+                </ul>
+                <p class="total-actual">Total: ${{ calcularTotalMesa(mesa) }}</p>
+              </div>
+
+              <div class="acciones-mesa">
+                <button v-if="mesa.estado === 'disponible'" @click="abrirMesa(mesa.id)" class="btn-abrir">Abrir Mesa</button>
+                <div v-else class="controles-activas">
+                  <button @click="prepararAgregarPedido(mesa.id)" class="btn-pedir">+ Pedido</button>
+                  <button @click="facturarMesa(mesa.id)" class="btn-facturar">Facturar</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <button class="add_btn_flotante" @click="abrirModalForm('mesa')">+ MESA</button>
         </div>
       </swiper-slide>
 
       <swiper-slide>
-        <div class="section facturacion">
-          <h2>Facturación</h2>
+        <div class="section-facturacion">
+          <h2>Historial de Facturación</h2>
+          <div class="tabla-facturas" v-if="listafacturas.length > 0">
+            <div class="factura-card-wrapper" v-for="factura in listafacturas" :key="factura.id">
+              
+              <div :id="'factura-print-' + factura.id" class="factura-item">
+                <div class="factura-header">
+                  <strong>Factura #{{ factura.id }}</strong>
+                  <span>{{ factura.fecha }}</span>
+                </div>
+                <p class="factura-origen"><strong>Mesa origen:</strong> {{ factura.numeroMesa }}</p>
+                <ul class="factura-items-list">
+                  <li v-for="item in factura.items" :key="item.id">
+                    {{ item.nombre }} x{{ item.cantidadPedida }} — ${{ item.precio * item.cantidadPedida }}
+                  </li>
+                </ul>
+                <h3 class="factura-total">Total: ${{ factura.total }}</h3>
+              </div>
+              
+              <div class="factura-acciones">
+                <button @click="descargarPDF(factura)" class="btn-pdf">📥 Guardar PDF</button>
+              </div>
+            </div>
+          </div>
+          <p v-else class="vacio">No se han generado facturas todavía.</p>
         </div>
       </swiper-slide>
     </swiper>
   </div>
 
-  <div class="modal_productos" v-if="mostrar">
+  <div class="modal_productos" v-if="mostrarModal">
     <div class="contenedor">
-      <h1>{{ titulo1 }}</h1>
-      <button @click="cerrarmodal">❌</button>
-      <label for="">ID</label>
-      <input v-model.number="id" type="number">
-      <label for="">nombre</label>
-      <input v-model="nombre" type="text">
-      <label for="">precio</label>
-      <input v-model.number="precio" type="number">
-      <label for="">cantidad</label>
-      <input v-model.number="cantidad" type="number">
-      <button @click="addboton()">AGREGAR</button>
+      <h1>{{ tituloModal }}</h1>
+      <button class="btn-cerrar" @click="cerrarModal">❌</button>
+      
+      <div v-if="tipoFormulario === 'producto'" class="form-group">
+        <label>ID del Producto</label>
+        <input v-model.number="formProducto.id" type="number" :disabled="idEditando !== -1">
+        <label>Nombre</label>
+        <input v-model="formProducto.nombre" type="text">
+        <label>Precio ($)</label>
+        <input v-model.number="formProducto.precio" type="number">
+        <label>Cantidad en Stock</label>
+        <input v-model.number="formProducto.cantidad" type="number">
+      </div>
+
+      <div v-if="tipoFormulario === 'mesa'" class="form-group">
+        <label>Número o Nombre de la Mesa</label>
+        <input v-model="formMesa.numero" type="text" placeholder="Ej: 1, VIP-1">
+      </div>
+
+      <button class="btn-guardar" @click="guardarFormulario">AGREGAR / GUARDAR</button>
     </div>
   </div>
 
+  <div class="modal_productos" v-if="mostrarModalPedido">
+    <div class="contenedor">
+      <h1>Pedido - Mesa {{ mesaSeleccionada?.numero }}</h1>
+      <button class="btn-cerrar" @click="mostrarModalPedido = false">❌</button>
+      
+      <label>Selecciona el Producto</label>
+      <select v-model="pedidoTemporal.productoId">
+        <option value="" disabled>-- Selecciona --</option>
+        <option v-for="prod in listaproductos" :key="prod.id" :value="prod.id" :disabled="prod.cantidad <= 0">
+          {{ prod.nombre }} (${{ prod.precio }})
+        </option>
+      </select>
+
+      <label>Cantidad</label>
+      <input v-model.number="pedidoTemporal.cantidad" type="number" min="1">
+
+      <button class="btn-guardar" @click="agregarProductoAMesa">Confirmar Pedido</button>
+    </div>
+  </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import logo from './assets/logotra.png'
-let mostrar = ref(false)
-let listaproductos = ref([])
-let titulo1 = ref("AGREGAR PRODUCTO")
-let addboton = ref(() => addProducto(-1))
-
-
-//variables de produtos
-let id = ref("")
-let nombre = ref("")
-let precio = ref("")
-let cantidad = ref("")
-
-function addProducto(x = -1) {
-  if (x == -1) {
-    const nuevoproducto = {
-      id: id.value,
-      nombre: nombre.value,
-      precio: precio.value,
-      cantidad: cantidad.value
-    }
-
-    listaproductos.value.push(nuevoproducto)
-
-    id.value = ""
-    nombre.value = ""
-    precio.value = ""
-    cantidad.value = ""
-
-    cerrarmodal()
-  }
-  else{
-    console.log("hola")
-  }
-
-
-}
-
-function eliminar(x) {
-  let posi = listaproductos.value.findIndex((item) => item.id == x)
-  console.log("posi")
-  listaproductos.value.splice(posi, 1)
-}
-
-function editar(x){
-  let posi = listaproductos.value.findIndex((item) => item.id == x)
-  id.value = listaproductos.value[posi].id
-  nombre.value = listaproductos.value[posi].nombre
-  precio.value = listaproductos.value[posi].precio
-  cantidad.value = listaproductos.value[posi].cantidad
-  titulo1 = `EDITAR ARTICULO ${listaproductos.value[posi].nombre}`
-  abrirmodal()
-  
-  addboton.value = () => addProducto(posi) 
-}
-
-
-
-const abrirmodal = () => {
-  mostrar.value = true;
-  console.log("se abrio")
-}
-const cerrarmodal = () => {
-  mostrar.value = false;
-  titulo1 = "AGREGAR PRODUCTO"
-  id.value = ""
-  nombre.value = ""
-  precio.value = ""
-  cantidad.value = ""
-  addboton.value = () => addProducto()
-}
-
-
-
-//importacion de swiper para el movimiento de el menu de los productos, mesas y facturas
 import { Swiper, SwiperSlide } from 'swiper/vue';
 import 'swiper/css';
+import html2pdf from 'html2pdf.js'
 
-const onSwiper = (swiper) => {
-  console.log('Swiper inicializado');
-};
-//fin de la importacion de swiper
+// --- ESTADOS GLOBALES ---
+const listaproductos = ref([
+  { id: 1, nombre: 'Hamburguesa', precio: 15000, cantidad: 20 },
+  { id: 2, nombre: 'Cerveza Club', precio: 5000, cantidad: 50 }
+])
+const listamesas = ref([
+  { id: 1, numero: '1', estado: 'disponible', pedidos: [] },
+  { id: 2, numero: '2', estado: 'disponible', pedidos: [] }
+])
+const listafacturas = ref([])
 
+// --- MODALES ---
+const mostrarModal = ref(false)
+const tipoFormulario = ref('producto')
+const idEditando = ref(-1)
 
+const formProducto = ref({ id: '', nombre: '', precio: '', cantidad: '' })
+const formMesa = ref({ numero: '' })
+
+const tituloModal = computed(() => {
+  if (tipoFormulario.value === 'mesa') return "NUEVA MESA"
+  return idEditando.value === -1 ? "AGREGAR PRODUCTO" : "EDITAR PRODUCTO"
+})
+
+const abrirModalForm = (tipo) => {
+  tipoFormulario.value = tipo
+  mostrarModal.value = true
+}
+
+const cerrarModal = () => {
+  mostrarModal.value = false
+  idEditando.value = -1
+  formProducto.value = { id: '', nombre: '', precio: '', cantidad: '' }
+  formMesa.value = { numero: '' }
+}
+
+const guardarFormulario = () => {
+  if (tipoFormulario.value === 'producto') {
+    if (idEditando.value === -1) {
+      listaproductos.value.push({ ...formProducto.value })
+    } else {
+      listaproductos.value[idEditando.value] = { ...formProducto.value }
+    }
+  } else if (tipoFormulario.value === 'mesa') {
+    listamesas.value.push({
+      id: Date.now(),
+      numero: formMesa.value.numero,
+      estado: 'disponible',
+      pedidos: []
+    })
+  }
+  cerrarModal()
+}
+
+// --- PRODUCTOS ---
+const editarProducto = (prodId) => {
+  const index = listaproductos.value.findIndex(p => p.id === prodId)
+  if (index !== -1) {
+    formProducto.value = { ...listaproductos.value[index] }
+    idEditando.value = index
+    abrirModalForm('producto')
+  }
+}
+
+const eliminarProducto = (prodId) => {
+  listaproductos.value = listaproductos.value.filter(p => p.id !== prodId)
+}
+
+// --- MESAS Y PEDIDOS ---
+const mostrarModalPedido = ref(false)
+const mesaSeleccionada = ref(null)
+const pedidoTemporal = ref({ productoId: '', cantidad: 1 })
+
+const abrirMesa = (mesaId) => {
+  const mesa = listamesas.value.find(m => m.id === mesaId)
+  if (mesa) mesa.estado = 'ocupada'
+}
+
+const prepararAgregarPedido = (mesaId) => {
+  mesaSeleccionada.value = listamesas.value.find(m => m.id === mesaId)
+  pedidoTemporal.value = { productoId: '', cantidad: 1 }
+  mostrarModalPedido.value = true
+}
+
+const agregarProductoAMesa = () => {
+  const prod = listaproductos.value.find(p => p.id === pedidoTemporal.value.productoId)
+  if (!prod) return alert("Selecciona un producto.")
+  if (prod.cantidad < pedidoTemporal.value.cantidad) return alert("Stock insuficiente.")
+
+  prod.cantidad -= pedidoTemporal.value.cantidad
+
+  const itemExistente = mesaSeleccionada.value.pedidos.find(p => p.id === prod.id)
+  if (itemExistente) {
+    itemExistente.cantidadPedida += pedidoTemporal.value.cantidad
+  } else {
+    mesaSeleccionada.value.pedidos.push({
+      id: prod.id,
+      nombre: prod.nombre,
+      precio: prod.precio,
+      cantidadPedida: pedidoTemporal.value.cantidad
+    })
+  }
+  mostrarModalPedido.value = false
+}
+
+const calcularTotalMesa = (mesa) => {
+  return mesa.pedidos.reduce((acc, item) => acc + (item.precio * item.cantidadPedida), 0)
+}
+
+const facturarMesa = (mesaId) => {
+  const mesa = listamesas.value.find(m => m.id === mesaId)
+  if (!mesa || mesa.pedidos.length === 0) return alert("Mesa sin consumos.")
+
+  listafacturas.value.push({
+    id: listafacturas.value.length + 1,
+    numeroMesa: mesa.numero,
+    items: [...mesa.pedidos],
+    total: calcularTotalMesa(mesa),
+    fecha: new Date().toLocaleString()
+  })
+  mesa.estado = 'disponible'
+  mesa.pedidos = []
+  irASlide(2)
+}
+
+const descargarPDF = (factura) => {
+  const elemento = document.getElementById(`factura-print-${factura.id}`);
+  if (!elemento) return;
+  const opciones = {
+    margin: 10,
+    filename: `Factura_${factura.id}.pdf`,
+    image: { type: 'jpeg', quality: 0.98 },
+    html2canvas: { scale: 2, useCORS: true },
+    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+  };
+  html2pdf().set(opciones).from(elemento).save();
+}
+
+// --- SWIPER ---
+const swiperInstance = ref(null)
+const onSwiper = (swiper) => { swiperInstance.value = swiper }
+const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.slideTo(index) }
 </script>
 
 <style>
-* {
-  margin: 0px;
-  padding: 0px
+/* CONFIGURACIÓN Y RESETS GLOBALES RESPONSIVOS */
+* { 
+  box-sizing: border-box; 
+  margin: 0; 
+  padding: 0; 
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
 }
 
-#app {
-  display: flex;
+#app { 
+  display: flex; 
+  flex-direction: column; 
+  height: 100vh; 
+  min-width: 300px; /* Evita roturas por debajo de este límite */
+  overflow-x: hidden;
+}
+
+/* ENCABEZADO / HEADER */
+.caja { 
+  display: flex; 
   flex-direction: column;
-  height: 100vh
+  align-items: center; 
+  background: #1e1e1e; 
+  padding: 12px; 
+  gap: 10px;
+  border-bottom: 3px solid #007bff;
 }
 
-#pri_logo {
-  width: 200px;
+#pri_logo { 
+  width: 130px; 
+  height: auto;
+  object-fit: contain;
 }
 
-.productos {
-  overflow-y: auto;
-  flex: 1;
-}
-
-/*estilos para el swiper*/
-.my-swiper {
+.menu-botones {
+  display: flex;
+  gap: 6px;
   width: 100%;
-  height: 100%;
-  /* Ocupa toda la pantalla */
-  flex-grow: 1;
-  overflow-y: auto;
-}
-
-.section {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
   justify-content: center;
-  height: 100%;
-  padding: 20px;
 }
 
-.add_producto {
-  position: fixed;
-  bottom: 10px;
-}
-
-.main {
-  overflow: hidden;
-  display: flex;
+.menu-botones button { 
   flex: 1;
+  max-width: 110px;
+  padding: 8px 4px; 
+  background: #333; 
+  border: 1px solid #444; 
+  color: white; 
+  cursor: pointer; 
+  border-radius: 6px; 
+  font-weight: bold; 
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  transition: all 0.2s ease;
 }
 
-/* Colores para diferenciar mientras pruebas */
-.productos {
-  background-color: #f8f9fa;
-  display: flex;
+.menu-botones button:hover { 
+  background: #007bff; 
+  border-color: #007bff;
+}
 
-  .producto {
-    display: flex;
-    place-items: center;
-    flex-direction: column;
-    padding: 10px;
-    margin: 8px;
-    border: 1px solid black;
-    border-radius: 10px
+/* CONTENEDOR PRINCIPAL */
+.main { 
+  flex: 1; 
+  display: flex; 
+  overflow: hidden; 
+  background-color: #f4f6f9;
+}
+.my-swiper { 
+  width: 100%; 
+  height: 100%; 
+}
+
+/* DISEÑO DE CONTENEDORES INTERNOS (PRODUCTOS Y MESAS) */
+.productos, .mesas-container, .section-facturacion { 
+  padding: 15px; 
+  overflow-y: auto; 
+  height: 100%; 
+  position: relative;
+  padding-bottom: 80px; /* Espacio para el botón flotante fijo */
+}
+
+.productos { background-color: #f8f9fa; }
+.mesas-container { background-color: #e9ecef; }
+.section-facturacion { background-color: #dee2e6; }
+
+.section-facturacion h2 {
+  font-size: 1.3rem;
+  margin-bottom: 15px;
+  color: #333;
+}
+
+/* REJILLA (GRID) INTELIGENTE PARA TARJETAS */
+.grid-items { 
+  display: grid; 
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); 
+  gap: 15px; 
+  width: 100%;
+}
+
+/* TARJETAS DE PRODUCTO Y MESA */
+.producto, .mesa-card { 
+  background: white; 
+  padding: 15px; 
+  border-radius: 10px; 
+  box-shadow: 0 3px 6px rgba(0,0,0,0.08); 
+  border: 1px solid #e0e0e0; 
+  display: flex; 
+  flex-direction: column; 
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.producto-info h1 { font-size: 1.25rem; color: #222; margin: 4px 0; }
+.producto-info h3 { font-size: 0.75rem; color: #888; }
+.producto-info p { font-size: 0.9rem; color: #555; }
+
+/* CONTROLES DE MESAS */
+.mesa-card { border-top: 5px solid #6c757d; }
+.mesa-card.disponible { border-top-color: #28a745; }
+.mesa-card.ocupada { border-top-color: #dc3545; }
+
+.mesa-header-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.mesa-header-info h2 { font-size: 1.2rem; }
+
+.badge { 
+  padding: 4px 8px; 
+  font-size: 0.7rem; 
+  border-radius: 4px; 
+  font-weight: bold; 
+  color: white; 
+}
+.disponible .badge { background: #28a745; }
+.ocupada .badge { background: #dc3545; }
+
+.pedido-detalle { 
+  background: #f8f9fa; 
+  padding: 10px; 
+  border-radius: 6px; 
+  font-size: 0.85rem; 
+}
+.pedido-detalle ul { list-style: none; margin-top: 5px; }
+.pedido-detalle li { margin-bottom: 3px; color: #555; }
+.total-actual { 
+  font-weight: bold; 
+  border-top: 1px dashed #ccc; 
+  margin-top: 8px; 
+  padding-top: 6px; 
+  color: #000; 
+}
+
+/* BOTONES INTERNOS DE ACCIÓN */
+.acciones, .acciones-mesa { display: flex; gap: 6px; }
+.acciones button, .acciones-mesa button { 
+  flex: 1; 
+  padding: 8px; 
+  font-size: 0.8rem; 
+  font-weight: bold;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn-editar { background: #e3f2fd; color: #0d6efd; }
+.btn-eliminar { background: #ffebee; color: #dc3545; }
+.btn-abrir { background: #28a745; color: white; }
+.controles-activas { display: flex; gap: 6px; width: 100%; }
+.btn-pedir { background: #ffc107; color: #212529; flex: 1; }
+.btn-facturar { background: #17a2b8; color: white; flex: 1; }
+
+/* HISTORIAL DE FACTURAS */
+.tabla-facturas { 
+  display: flex; 
+  flex-direction: column; 
+  gap: 15px; 
+}
+.factura-card-wrapper { 
+  background: white; 
+  border-radius: 10px; 
+  padding: 15px; 
+  box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+.factura-item { background: white; }
+.factura-header { 
+  display: flex; 
+  justify-content: space-between; 
+  font-size: 0.8rem; 
+  color: #666; 
+  border-bottom: 1px dashed #ddd;
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+}
+.factura-origen { font-size: 0.9rem; margin-bottom: 5px; }
+.factura-items-list { padding-left: 15px; font-size: 0.85rem; margin-bottom: 10px; color: #444; }
+.factura-total { font-size: 1.1rem; border-top: 2px solid #333; padding-top: 5px; display: inline-block; }
+.factura-acciones { display: flex; justify-content: flex-end; margin-top: 10px; border-top: 1px solid #eee; padding-top: 8px; }
+.btn-pdf { background: #007bff; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.8rem; }
+
+/* BOTÓN FLOTANTE COMODIDAD */
+.add_btn_flotante { 
+  position: fixed; 
+  bottom: 20px; 
+  right: 20px; 
+  padding: 12px 20px; 
+  background: #007bff; 
+  color: white; 
+  border: none; 
+  border-radius: 50px; 
+  font-weight: bold; 
+  cursor: pointer; 
+  z-index: 99; 
+  box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+  font-size: 0.85rem;
+}
+
+/* MODALES RESPONSIVOS */
+.modal_productos { 
+  background: rgba(0, 0, 0, 0.6); 
+  backdrop-filter: blur(4px); 
+  position: fixed; 
+  top: 0; left: 0; right: 0; bottom: 0; 
+  display: flex; 
+  align-items: center; 
+  justify-content: center; 
+  z-index: 2000; 
+  padding: 15px;
+}
+.contenedor { 
+  background: white; 
+  padding: 20px; 
+  border-radius: 12px; 
+  width: 100%;
+  max-width: 380px; /* Limita el ancho en pantallas grandes */
+  display: flex; 
+  flex-direction: column; 
+  gap: 10px; 
+  position: relative; 
+}
+.contenedor h1 { font-size: 1.2rem; color: #333; margin-bottom: 5px; }
+.btn-cerrar { position: absolute; top: 15px; right: 15px; background: none; border: none; font-size: 1.1rem; cursor: pointer; }
+.form-group { display: flex; flex-direction: column; gap: 6px; }
+.contenedor label { font-size: 0.85rem; font-weight: bold; color: #555; }
+.contenedor input, .contenedor select { padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 0.95rem; width: 100%; }
+.btn-guardar { padding: 10px; background: #28a745; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 5px; }
+
+.vacio { text-align: center; color: #777; margin-top: 30px; font-size: 0.9rem; }
+
+
+/* ==========================================
+   MEDIA QUERIES PARA PANTALLAS (MEDIANAS / GRANDES)
+   ========================================== */
+@media (min-width: 480px) {
+  .caja {
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 10px 20px;
+  }
+  .menu-botones {
+    width: auto;
+    justify-content: flex-end;
+  }
+  .menu-botones button {
+    font-size: 0.85rem;
+    padding: 8px 16px;
+    max-width: none;
   }
 }
 
-.mesas {
-  background-color: #e9ecef;
+@media (min-width: 768px) {
+  .productos, .mesas-container, .section-facturacion {
+    padding: 25px;
+  }
+  .grid-items {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+  }
+  .section-facturacion h2 {
+    font-size: 1.6rem;
+  }
 }
 
-.facturacion {
-  background-color: #dee2e6;
-}
-
-/*fin de los estilos de swiper*/
-
-.modal_productos {
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
-  height: 100vh;
-  position: absolute;
-  display: flex;
-  place-items: center;
-  place-content: center;
-  top: 0;
-  left: -50%;
-  right: -50%;
-  z-index: 10;
-
-  .contenedor {
-    justify-content: center;
-    display: flex;
-    flex-direction: column;
-    width: 400px;
+/* REGLAS ESPECIALES PARA AJUSTAR CASOS DE EXTREMO BAJO (300px) */
+@media (max-width: 340px) {
+  .grid-items {
+    grid-template-columns: 1fr; /* Una columna obligatoria si el espacio es crítico */
+  }
+  .menu-botones button {
+    font-size: 0.7rem;
+    padding: 6px 2px;
   }
 }
 </style>
