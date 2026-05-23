@@ -13,8 +13,17 @@
       
       <swiper-slide id="pro">
         <div class="productos">
-          <div class="grid-items">
-            <div class="producto" v-for="item in listaproductos" :key="item.id">
+          <div class="contenedor-busqueda">
+            <input 
+              v-model="buscarProducto" 
+              type="text" 
+              placeholder="🔍 Buscar producto por nombre o ID..." 
+              class="input-busqueda"
+            />
+          </div>
+
+          <div class="grid-items" v-if="productosFiltrados.length > 0">
+            <div class="producto" v-for="item in productosFiltrados" :key="item.id">
               <div class="producto-info">
                 <h3>ID: {{ item.id }}</h3>
                 <h1>{{ item.nombre }}</h1>
@@ -27,14 +36,25 @@
               </div>
             </div>
           </div>
+          <p v-else class="vacio">No se encontraron productos que coincidan.</p>
+
           <button class="add_btn_flotante" @click="abrirModalForm('producto')">+ PRODUCTO</button>
         </div>
       </swiper-slide>
 
       <swiper-slide>
         <div class="mesas-container">
-          <div class="grid-items">
-            <div class="mesa-card" v-for="mesa in listamesas" :key="mesa.id" :class="mesa.estado">
+          <div class="contenedor-busqueda">
+            <input 
+              v-model="buscarMesa" 
+              type="text" 
+              placeholder="🔍 Buscar mesa por número o estado (ej: disponible)..." 
+              class="input-busqueda"
+            />
+          </div>
+
+          <div class="grid-items" v-if="mesasFiltradas.length > 0">
+            <div class="mesa-card" v-for="mesa in mesasFiltradas" :key="mesa.id" :class="mesa.estado">
               
               <div class="admin-mesa-acciones" v-if="mesa.estado === 'disponible'">
                 <button @click="editarMesa(mesa.id)" class="btn-mini-accion" title="Editar Mesa">⚙️</button>
@@ -66,6 +86,8 @@
               </div>
             </div>
           </div>
+          <p v-else class="vacio">No se encontraron mesas que coincidan.</p>
+
           <button class="add_btn_flotante" @click="abrirModalForm('mesa')">+ MESA</button>
         </div>
       </swiper-slide>
@@ -73,8 +95,18 @@
       <swiper-slide>
         <div class="section-facturacion">
           <h2>Historial de Facturación</h2>
-          <div class="tabla-facturas" v-if="listafacturas.length > 0">
-            <div class="factura-card-wrapper" v-for="factura in listafacturas" :key="factura.id">
+          
+          <div class="contenedor-busqueda">
+            <input 
+              v-model="buscarFactura" 
+              type="text" 
+              placeholder="🔍 Buscar factura por ID, cliente o mesa..." 
+              class="input-busqueda"
+            />
+          </div>
+
+          <div class="tabla-facturas" v-if="facturasFiltradas.length > 0">
+            <div class="factura-card-wrapper" v-for="factura in facturasFiltradas" :key="factura.id">
               
               <div :id="'factura-print-' + factura.id" class="factura-item">
                 <div class="factura-header">
@@ -96,7 +128,7 @@
               </div>
             </div>
           </div>
-          <p v-else class="vacio">No se han generado facturas todavía.</p>
+          <p v-else class="vacio">No se encontraron facturas registradas o que coincidan.</p>
         </div>
       </swiper-slide>
     </swiper>
@@ -222,6 +254,40 @@ const actualizarLocalStorage = () => {
   localStorage.setItem('listamesas', JSON.stringify(listamesas.value))
   localStorage.setItem('listafacturas', JSON.stringify(listafacturas.value))
 }
+
+// --- ESTADOS DE BÚSQUEDA ---
+const buscarProducto = ref('')
+const buscarMesa = ref('')
+const buscarFactura = ref('')
+
+// --- PROPIEDADES COMPUTADAS PARA FILTRADO EN TIEMPO REAL ---
+const productosFiltrados = computed(() => {
+  if (!buscarProducto.value.trim()) return listaproductos.value
+  const query = buscarProducto.value.toLowerCase().trim()
+  return listaproductos.value.filter(p => 
+    p.nombre.toLowerCase().includes(query) || 
+    p.id.toString().includes(query)
+  )
+})
+
+const mesasFiltradas = computed(() => {
+  if (!buscarMesa.value.trim()) return listamesas.value
+  const query = buscarMesa.value.toLowerCase().trim()
+  return listamesas.value.filter(m => 
+    m.numero.toLowerCase().includes(query) || 
+    m.estado.toLowerCase().includes(query)
+  )
+})
+
+const facturasFiltradas = computed(() => {
+  if (!buscarFactura.value.trim()) return listafacturas.value
+  const query = buscarFactura.value.toLowerCase().trim()
+  return listafacturas.value.filter(f => 
+    f.id.toString().includes(query) || 
+    f.numeroMesa.toLowerCase().includes(query) || 
+    f.cliente.nombre.toLowerCase().includes(query)
+  )
+})
 
 // --- ESTADOS DE VALIDACIÓN ---
 const mensajeErrorModal = ref('')
@@ -402,8 +468,6 @@ const calcularTotalMesa = (mesa) => {
 }
 
 // --- LÓGICA DE FLUJO SECUENCIAL DE FACTURACIÓN ---
-
-// Al pulsar Facturar en la mesa, abre el primer modal de selección
 const iniciarProcesoFacturacion = (mesaId) => {
   const mesa = listamesas.value.find(m => m.id === mesaId)
   if (!mesa || mesa.pedidos.length === 0) return
@@ -412,13 +476,11 @@ const iniciarProcesoFacturacion = (mesaId) => {
   mostrarModalTipoFactura.value = true
 }
 
-// Opción 1: Facturar de forma Anónima
 const facturarAnonimo = () => {
   ejecutarFacturacion({ nombre: 'Anónimo / Consumidor Final', documento: '' })
   mostrarModalTipoFactura.value = false
 }
 
-// Cambio de ventana: Cierra el de opciones y abre el de datos
 const irADatosCliente = () => {
   mostrarModalTipoFactura.value = false
   formCliente.value = { nombre: '', documento: '' }
@@ -426,7 +488,6 @@ const irADatosCliente = () => {
   mostrarModalDatosCliente.value = true
 }
 
-// Opción 2: Validar campos y procesar datos del cliente
 const facturarConDatos = () => {
   if (!formCliente.value.nombre.trim()) {
     mensajeErrorCliente.value = 'El nombre o razón social es obligatorio.'
@@ -440,7 +501,6 @@ const facturarConDatos = () => {
   mostrarModalDatosCliente.value = false
 }
 
-// Función core centralizada encargada de persistir el cierre físico de la mesa
 const ejecutarFacturacion = (datosCliente) => {
   const mesa = mesaAFacturar.value
   if (!mesa) return
@@ -448,19 +508,18 @@ const ejecutarFacturacion = (datosCliente) => {
   listafacturas.value.push({
     id: listafacturas.value.length + 1,
     numeroMesa: mesa.numero,
-    cliente: datosCliente, // Inyectamos el objeto con la data del cliente
+    cliente: datosCliente,
     items: [...mesa.pedidos],
     total: calcularTotalMesa(mesa),
     fecha: new Date().toLocaleString()
   })
   
-  // Limpieza física del estado ocupado de la mesa
   mesa.estado = 'disponible'
   mesa.pedidos = []
   mesaAFacturar.value = null
   
   actualizarLocalStorage()
-  irASlide(2) // Desplaza automáticamente al slider de visualización de facturas
+  irASlide(2) 
 }
 
 const cerrarmesa = (mesaId) => {
@@ -560,6 +619,29 @@ const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.sli
 .menu-botones button:hover { 
   background: #007bff; 
   border-color: #007bff;
+}
+
+/* ESTILOS DE LA BARRA DE BÚSQUEDA ADICIONADA */
+.contenedor-busqueda {
+  width: 100%;
+  margin-bottom: 15px;
+}
+
+.input-busqueda {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  font-size: 0.95rem;
+  background-color: #ffffff;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.input-busqueda:focus {
+  border-color: #007bff;
+  box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.15);
 }
 
 /* CONTENEDOR PRINCIPAL */
