@@ -18,7 +18,7 @@
               <div class="producto-info">
                 <h3>ID: {{ item.id }}</h3>
                 <h1>{{ item.nombre }}</h1>
-                <p>Precio: ${{ item.precio }}</p>
+                <p>Precio: {{ formatearMoneda(item.precio) }}</p>
                 <p>Stock: {{ item.cantidad }} u.</p>
               </div>
               <div class="acciones">
@@ -44,10 +44,10 @@
                 <h4>Consumo:</h4>
                 <ul>
                   <li v-for="p in mesa.pedidos" :key="p.id">
-                    {{ p.nombre }} x{{ p.cantidadPedida }} (${{ p.precio * p.cantidadPedida }})
+                    {{ p.nombre }} x{{ p.cantidadPedida }} ({{ formatearMoneda(p.precio * p.cantidadPedida) }})
                   </li>
                 </ul>
-                <p class="total-actual">Total: ${{ calcularTotalMesa(mesa) }}</p>
+                <p class="total-actual">Total: {{ formatearMoneda(calcularTotalMesa(mesa)) }}</p>
               </div>
 
               <div class="acciones-mesa">
@@ -77,10 +77,10 @@
                 <p class="factura-origen"><strong>Mesa origen:</strong> {{ factura.numeroMesa }}</p>
                 <ul class="factura-items-list">
                   <li v-for="item in factura.items" :key="item.id">
-                    {{ item.nombre }} x{{ item.cantidadPedida }} — ${{ item.precio * item.cantidadPedida }}
+                    {{ item.nombre }} x{{ item.cantidadPedida }} — {{ formatearMoneda(item.precio * item.cantidadPedida) }}
                   </li>
                 </ul>
-                <h3 class="factura-total">Total: ${{ factura.total }}</h3>
+                <h3 class="factura-total">Total: {{ formatearMoneda(factura.total) }}</h3>
               </div>
               
               <div class="factura-acciones">
@@ -98,6 +98,8 @@
     <div class="contenedor">
       <h1>{{ tituloModal }}</h1>
       <button class="btn-cerrar" @click="cerrarModal">❌</button>
+      
+      <div class="error-banner" v-if="mensajeErrorModal">{{ mensajeErrorModal }}</div>
       
       <div v-if="tipoFormulario === 'producto'" class="form-group">
         <label>ID del Producto</label>
@@ -122,13 +124,15 @@
   <div class="modal_productos" v-if="mostrarModalPedido">
     <div class="contenedor">
       <h1>Pedido - Mesa {{ mesaSeleccionada?.numero }}</h1>
-      <button class="btn-cerrar" @click="mostrarModalPedido = false">❌</button>
+      <button class="btn-cerrar" @click="mostrarModalPedido = false; mensajeErrorPedido = ''">❌</button>
+      
+      <div class="error-banner" v-if="mensajeErrorPedido">{{ mensajeErrorPedido }}</div>
       
       <label>Selecciona el Producto</label>
       <select v-model="pedidoTemporal.productoId">
         <option value="" disabled>-- Selecciona --</option>
         <option v-for="prod in listaproductos" :key="prod.id" :value="prod.id" :disabled="prod.cantidad <= 0">
-          {{ prod.nombre }} (${{ prod.precio }})
+          {{ prod.nombre }} ({{ formatearMoneda(prod.precio) }})
         </option>
       </select>
 
@@ -147,16 +151,39 @@ import { Swiper, SwiperSlide } from 'swiper/vue';
 import 'swiper/css';
 import html2pdf from 'html2pdf.js'
 
-// --- ESTADOS GLOBALES ---
-const listaproductos = ref([
+// --- FORMATO DE MONEDA CON PUNTUACIÓN DE MILES ---
+const formatearMoneda = (valor) => {
+  if (valor === undefined || valor === null || isNaN(valor)) return '$0'
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  }).format(valor)
+}
+
+// --- CONFIGURACIÓN E INICIALIZACIÓN DE LOCAL STORAGE ---
+const listaproductos = ref(JSON.parse(localStorage.getItem('listaproductos')) || [
   { id: 1, nombre: 'Hamburguesa', precio: 15000, cantidad: 20 },
   { id: 2, nombre: 'Cerveza Club', precio: 5000, cantidad: 50 }
 ])
-const listamesas = ref([
+
+const listamesas = ref(JSON.parse(localStorage.getItem('listamesas')) || [
   { id: 1, numero: '1', estado: 'disponible', pedidos: [] },
   { id: 2, numero: '2', estado: 'disponible', pedidos: [] }
 ])
-const listafacturas = ref([])
+
+const listafacturas = ref(JSON.parse(localStorage.getItem('listafacturas')) || [])
+
+const actualizarLocalStorage = () => {
+  localStorage.setItem('listaproductos', JSON.stringify(listaproductos.value))
+  localStorage.setItem('listamesas', JSON.stringify(listamesas.value))
+  localStorage.setItem('listafacturas', JSON.stringify(listafacturas.value))
+}
+
+// --- ESTADOS DE VALIDACIÓN (REEMPLAZO DE ALERTS) ---
+const mensajeErrorModal = ref('')
+const mensajeErrorPedido = ref('')
 
 // --- MODALES ---
 const mostrarModal = ref(false)
@@ -173,24 +200,50 @@ const tituloModal = computed(() => {
 
 const abrirModalForm = (tipo) => {
   tipoFormulario.value = tipo
+  mensajeErrorModal.value = ''
   mostrarModal.value = true
 }
 
 const cerrarModal = () => {
   mostrarModal.value = false
   idEditando.value = -1
+  mensajeErrorModal.value = ''
   formProducto.value = { id: '', nombre: '', precio: '', cantidad: '' }
   formMesa.value = { numero: '' }
 }
 
 const guardarFormulario = () => {
+  mensajeErrorModal.value = ''
+  
   if (tipoFormulario.value === 'producto') {
+    // Validar campos vacíos del producto
+    if (!formProducto.value.id || !formProducto.value.nombre || !formProducto.value.precio || formProducto.value.cantidad === '') {
+      mensajeErrorModal.value = 'Todos los campos son obligatorios.'
+      return
+    }
+    if (formProducto.value.precio <= 0 || formProducto.value.cantidad < 0) {
+      mensajeErrorModal.value = 'El precio debe ser mayor a 0 y el stock no puede ser negativo.'
+      return
+    }
+
     if (idEditando.value === -1) {
+      // Validar ID duplicado al crear un nuevo producto
+      const existeId = listaproductos.value.some(p => p.id === formProducto.value.id)
+      if (existeId) {
+        mensajeErrorModal.value = 'El ID ingresado ya pertenece a otro producto.'
+        return
+      }
       listaproductos.value.push({ ...formProducto.value })
     } else {
       listaproductos.value[idEditando.value] = { ...formProducto.value }
     }
   } else if (tipoFormulario.value === 'mesa') {
+    // Validar campos vacíos de la mesa
+    if (!formMesa.value.numero || formMesa.value.numero.toString().trim() === '') {
+      mensajeErrorModal.value = 'El nombre o número de la mesa es requerido.'
+      return
+    }
+    
     listamesas.value.push({
       id: Date.now(),
       numero: formMesa.value.numero,
@@ -198,6 +251,8 @@ const guardarFormulario = () => {
       pedidos: []
     })
   }
+  
+  actualizarLocalStorage()
   cerrarModal()
 }
 
@@ -213,6 +268,7 @@ const editarProducto = (prodId) => {
 
 const eliminarProducto = (prodId) => {
   listaproductos.value = listaproductos.value.filter(p => p.id !== prodId)
+  actualizarLocalStorage()
 }
 
 // --- MESAS Y PEDIDOS ---
@@ -222,19 +278,40 @@ const pedidoTemporal = ref({ productoId: '', cantidad: 1 })
 
 const abrirMesa = (mesaId) => {
   const mesa = listamesas.value.find(m => m.id === mesaId)
-  if (mesa) mesa.estado = 'ocupada'
+  if (mesa) {
+    mesa.estado = 'ocupada'
+    actualizarLocalStorage()
+  }
 }
+
+const tabularMesaError = ref(false) // Auxiliar visual
 
 const prepararAgregarPedido = (mesaId) => {
   mesaSeleccionada.value = listamesas.value.find(m => m.id === mesaId)
   pedidoTemporal.value = { productoId: '', cantidad: 1 }
+  mensajeErrorPedido.value = ''
   mostrarModalPedido.value = true
 }
 
 const agregarProductoAMesa = () => {
+  mensajeErrorPedido.value = ''
+  
+  if (!pedidoTemporal.value.productoId) {
+    mensajeErrorPedido.value = 'Debes seleccionar un producto del catálogo.'
+    return
+  }
+  if (!pedidoTemporal.value.cantidad || pedidoTemporal.value.cantidad <= 0) {
+    mensajeErrorPedido.value = 'La cantidad debe ser mayor o igual a 1.'
+    return
+  }
+
   const prod = listaproductos.value.find(p => p.id === pedidoTemporal.value.productoId)
-  if (!prod) return alert("Selecciona un producto.")
-  if (prod.cantidad < pedidoTemporal.value.cantidad) return alert("Stock insuficiente.")
+  if (!prod) return
+
+  if (prod.cantidad < pedidoTemporal.value.cantidad) {
+    mensajeErrorPedido.value = `Unidades insuficientes. El stock disponible actual es de ${prod.cantidad} u.`
+    return
+  }
 
   prod.cantidad -= pedidoTemporal.value.cantidad
 
@@ -249,6 +326,8 @@ const agregarProductoAMesa = () => {
       cantidadPedida: pedidoTemporal.value.cantidad
     })
   }
+  
+  actualizarLocalStorage()
   mostrarModalPedido.value = false
 }
 
@@ -258,7 +337,7 @@ const calcularTotalMesa = (mesa) => {
 
 const facturarMesa = (mesaId) => {
   const mesa = listamesas.value.find(m => m.id === mesaId)
-  if (!mesa || mesa.pedidos.length === 0) return alert("Mesa sin consumos.")
+  if (!mesa || mesa.pedidos.length === 0) return
 
   listafacturas.value.push({
     id: listafacturas.value.length + 1,
@@ -267,8 +346,11 @@ const facturarMesa = (mesaId) => {
     total: calcularTotalMesa(mesa),
     fecha: new Date().toLocaleString()
   })
+  
   mesa.estado = 'disponible'
   mesa.pedidos = []
+  
+  actualizarLocalStorage()
   irASlide(2)
 }
 
@@ -277,7 +359,7 @@ const descargarPDF = (factura) => {
   if (!elemento) return;
   const opciones = {
     margin: 10,
-    filename: `Factura_${factura.id}.pdf`,
+    filename: `Factura_${factura.id}_Mesa_${factura.numeroMesa}.pdf`,
     image: { type: 'jpeg', quality: 0.98 },
     html2canvas: { scale: 2, useCORS: true },
     jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
@@ -304,7 +386,7 @@ const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.sli
   display: flex; 
   flex-direction: column; 
   height: 100vh; 
-  min-width: 300px; /* Evita roturas por debajo de este límite */
+  min-width: 300px;
   overflow-x: hidden;
 }
 
@@ -364,13 +446,13 @@ const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.sli
   height: 100%; 
 }
 
-/* DISEÑO DE CONTENEDORES INTERNOS (PRODUCTOS Y MESAS) */
+/* DISEÑO DE CONTENEDORES INTERNOS */
 .productos, .mesas-container, .section-facturacion { 
   padding: 15px; 
   overflow-y: auto; 
   height: 100%; 
   position: relative;
-  padding-bottom: 80px; /* Espacio para el botón flotante fijo */
+  padding-bottom: 80px; 
 }
 
 .productos { background-color: #f8f9fa; }
@@ -492,7 +574,7 @@ const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.sli
 .factura-acciones { display: flex; justify-content: flex-end; margin-top: 10px; border-top: 1px solid #eee; padding-top: 8px; }
 .btn-pdf { background: #007bff; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.8rem; }
 
-/* BOTÓN FLOTANTE COMODIDAD */
+/* BOTÓN FLOTANTE */
 .add_btn_flotante { 
   position: fixed; 
   bottom: 20px; 
@@ -509,7 +591,7 @@ const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.sli
   font-size: 0.85rem;
 }
 
-/* MODALES RESPONSIVOS */
+/* MODALES RESPONSIVOS Y ELEMENTOS DE ERROR */
 .modal_productos { 
   background: rgba(0, 0, 0, 0.6); 
   backdrop-filter: blur(4px); 
@@ -526,12 +608,25 @@ const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.sli
   padding: 20px; 
   border-radius: 12px; 
   width: 100%;
-  max-width: 380px; /* Limita el ancho en pantallas grandes */
+  max-width: 380px; 
   display: flex; 
   flex-direction: column; 
   gap: 10px; 
   position: relative; 
 }
+
+/* BANNER DE NOTIFICACIONES DE ERROR */
+.error-banner {
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+  padding: 10px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-align: center;
+}
+
 .contenedor h1 { font-size: 1.2rem; color: #333; margin-bottom: 5px; }
 .btn-cerrar { position: absolute; top: 15px; right: 15px; background: none; border: none; font-size: 1.1rem; cursor: pointer; }
 .form-group { display: flex; flex-direction: column; gap: 6px; }
@@ -541,10 +636,7 @@ const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.sli
 
 .vacio { text-align: center; color: #777; margin-top: 30px; font-size: 0.9rem; }
 
-
-/* ==========================================
-   MEDIA QUERIES PARA PANTALLAS (MEDIANAS / GRANDES)
-   ========================================== */
+/* MEDIA QUERIES PARA PANTALLAS */
 @media (min-width: 480px) {
   .caja {
     flex-direction: row;
@@ -575,10 +667,9 @@ const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.sli
   }
 }
 
-/* REGLAS ESPECIALES PARA AJUSTAR CASOS DE EXTREMO BAJO (300px) */
 @media (max-width: 340px) {
   .grid-items {
-    grid-template-columns: 1fr; /* Una columna obligatoria si el espacio es crítico */
+    grid-template-columns: 1fr;
   }
   .menu-botones button {
     font-size: 0.7rem;
