@@ -60,7 +60,7 @@
                 <button v-if="mesa.estado === 'disponible'" @click="abrirMesa(mesa.id)" class="btn-abrir">Abrir Mesa</button>
                 <div v-else class="controles-activas">
                   <button @click="prepararAgregarPedido(mesa.id)" class="btn-pedir">+ Pedido</button>
-                  <button @click="facturarMesa(mesa.id)" class="btn-facturar">Facturar</button>
+                  <button @click="iniciarProcesoFacturacion(mesa.id)" class="btn-facturar">Facturar</button>
                   <button @click="cerrarmesa(mesa.id)" class="btn-cerrar-mesas">Cerrar mesa</button>
                 </div>
               </div>
@@ -82,6 +82,7 @@
                   <span>{{ factura.fecha }}</span>
                 </div>
                 <p class="factura-origen"><strong>Mesa origen:</strong> {{ factura.numeroMesa }}</p>
+                <p class="factura-cliente"><strong>Cliente:</strong> {{ factura.cliente.nombre }} {{ factura.cliente.documento ? `(CC/NIT: ${factura.cliente.documento})` : '' }}</p>
                 <ul class="factura-items-list">
                   <li v-for="item in factura.items" :key="item.id">
                     {{ item.nombre }} x{{ item.cantidadPedida }} — {{ formatearMoneda(item.precio * item.cantidadPedida) }}
@@ -149,6 +150,38 @@
       <button class="btn-guardar" @click="agregarProductoAMesa">Confirmar Pedido</button>
     </div>
   </div>
+
+  <div class="modal_productos" v-if="mostrarModalTipoFactura">
+    <div class="contenedor">
+      <h1>Facturar Mesa {{ mesaAFacturar?.numero }}</h1>
+      <button class="btn-cerrar" @click="mostrarModalTipoFactura = false">❌</button>
+      <p style="font-size: 0.95rem; color: #555; text-align: center; margin: 10px 0;">¿Cómo deseas emitir esta factura?</p>
+      
+      <div class="opciones-factura">
+        <button @click="facturarAnonimo" class="btn-opcion-anonimo">👤 Consumidor Final (Anónimo)</button>
+        <button @click="irADatosCliente" class="btn-opcion-cliente">📝 Registrar Datos de Cliente</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal_productos" v-if="mostrarModalDatosCliente">
+    <div class="contenedor">
+      <h1>Datos del Cliente</h1>
+      <button class="btn-cerrar" @click="mostrarModalDatosCliente = false">❌</button>
+      
+      <div class="error-banner" v-if="mensajeErrorCliente">{{ mensajeErrorCliente }}</div>
+      
+      <div class="form-group">
+        <label>Nombre Completo / Razón Social</label>
+        <input v-model="formCliente.nombre" type="text" placeholder="Ej: Juan Pérez">
+        
+        <label>Cédula o NIT</label>
+        <input v-model="formCliente.documento" type="text" placeholder="Ej: 1010XXXXXX">
+      </div>
+
+      <button class="btn-guardar" @click="facturarConDatos">Generar Factura</button>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -190,17 +223,24 @@ const actualizarLocalStorage = () => {
   localStorage.setItem('listafacturas', JSON.stringify(listafacturas.value))
 }
 
-// --- ESTADOS DE VALIDACIÓN (REEMPLAZO DE ALERTS) ---
+// --- ESTADOS DE VALIDACIÓN ---
 const mensajeErrorModal = ref('')
 const mensajeErrorPedido = ref('')
+const mensajeErrorCliente = ref('')
 
-// --- MODALES ---
+// --- MODALES GENERALES ---
 const mostrarModal = ref(false)
 const tipoFormulario = ref('producto')
-const idEditando = ref(-1) // Guarda el índice del elemento que se edita en su respectivo array
+const idEditando = ref(-1)
 
 const formProducto = ref({ id: '', nombre: '', precio: '', cantidad: '' })
 const formMesa = ref({ numero: '' })
+
+// --- NUEVOS ESTADOS PARA FACTURACIÓN EN DOS PASOS ---
+const mostrarModalTipoFactura = ref(false)
+const mostrarModalDatosCliente = ref(false)
+const mesaAFacturar = ref(null)
+const formCliente = ref({ nombre: '', documento: '' })
 
 const tituloModal = computed(() => {
   if (tipoFormulario.value === 'mesa') {
@@ -254,7 +294,6 @@ const guardarFormulario = () => {
     }
 
     if (idEditando.value === -1) {
-      // Crear nueva mesa
       listamesas.value.push({
         id: Date.now(),
         numero: formMesa.value.numero,
@@ -262,7 +301,6 @@ const guardarFormulario = () => {
         pedidos: []
       })
     } else {
-      // Actualizar mesa existente conservando sus propiedades intactas
       listamesas.value[idEditando.value].numero = formMesa.value.numero
     }
   }
@@ -286,7 +324,7 @@ const eliminarProducto = (prodId) => {
   actualizarLocalStorage()
 }
 
-// --- MESAS ACCIONES NUEVAS (EDITAR Y ELIMINAR) ---
+// --- MESAS ACCIONES ---
 const editarMesa = (mesaId) => {
   const index = listamesas.value.findIndex(m => m.id === mesaId)
   if (index !== -1) {
@@ -363,34 +401,75 @@ const calcularTotalMesa = (mesa) => {
   return mesa.pedidos.reduce((acc, item) => acc + (item.precio * item.cantidadPedida), 0)
 }
 
-const facturarMesa = (mesaId) => {
+// --- LÓGICA DE FLUJO SECUENCIAL DE FACTURACIÓN ---
+
+// Al pulsar Facturar en la mesa, abre el primer modal de selección
+const iniciarProcesoFacturacion = (mesaId) => {
   const mesa = listamesas.value.find(m => m.id === mesaId)
   if (!mesa || mesa.pedidos.length === 0) return
+  
+  mesaAFacturar.value = mesa
+  mostrarModalTipoFactura.value = true
+}
+
+// Opción 1: Facturar de forma Anónima
+const facturarAnonimo = () => {
+  ejecutarFacturacion({ nombre: 'Anónimo / Consumidor Final', documento: '' })
+  mostrarModalTipoFactura.value = false
+}
+
+// Cambio de ventana: Cierra el de opciones y abre el de datos
+const irADatosCliente = () => {
+  mostrarModalTipoFactura.value = false
+  formCliente.value = { nombre: '', documento: '' }
+  mensajeErrorCliente.value = ''
+  mostrarModalDatosCliente.value = true
+}
+
+// Opción 2: Validar campos y procesar datos del cliente
+const facturarConDatos = () => {
+  if (!formCliente.value.nombre.trim()) {
+    mensajeErrorCliente.value = 'El nombre o razón social es obligatorio.'
+    return
+  }
+  
+  ejecutarFacturacion({ 
+    nombre: formCliente.value.nombre.trim(), 
+    documento: formCliente.value.documento.trim() 
+  })
+  mostrarModalDatosCliente.value = false
+}
+
+// Función core centralizada encargada de persistir el cierre físico de la mesa
+const ejecutarFacturacion = (datosCliente) => {
+  const mesa = mesaAFacturar.value
+  if (!mesa) return
 
   listafacturas.value.push({
     id: listafacturas.value.length + 1,
     numeroMesa: mesa.numero,
+    cliente: datosCliente, // Inyectamos el objeto con la data del cliente
     items: [...mesa.pedidos],
     total: calcularTotalMesa(mesa),
     fecha: new Date().toLocaleString()
   })
   
+  // Limpieza física del estado ocupado de la mesa
   mesa.estado = 'disponible'
   mesa.pedidos = []
+  mesaAFacturar.value = null
   
   actualizarLocalStorage()
-  irASlide(2)
+  irASlide(2) // Desplaza automáticamente al slider de visualización de facturas
 }
 
 const cerrarmesa = (mesaId) => {
   const mesa = listamesas.value.find(m => m.id === mesaId)
   if (!mesa) return
 
-  // 1. Confirmación de seguridad
   const seguro = confirm(`¿Estás seguro de cerrar la Mesa ${mesa.numero}? Se cancelarán los pedidos actuales y se devolverá el stock.`)
   if (!seguro) return
 
-  // 2. Devolver el stock de los productos pedidos al catálogo
   mesa.pedidos.forEach(pedidoMesa => {
     const productoCatalogo = listaproductos.value.find(p => p.id === pedidoMesa.id)
     if (productoCatalogo) {
@@ -398,11 +477,8 @@ const cerrarmesa = (mesaId) => {
     }
   })
 
-  // 3. Restablecer las propiedades de la mesa
   mesa.estado = 'disponible'
   mesa.pedidos = []
-
-  // 4. Actualizar el almacenamiento local para guardar los cambios
   actualizarLocalStorage()
 }
 
@@ -580,7 +656,7 @@ const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.sli
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 5px; /* Margen para no chocar con los botones mini */
+  margin-top: 5px;
 }
 .mesa-header-info h2 { font-size: 1.2rem; }
 
@@ -630,7 +706,7 @@ const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.sli
 .btn-cerrar-mesas {
   background: #dc3545;
   color: white;
-  flex: 0.5; /* Un poco más pequeño que los otros dos botones */
+  flex: 0.5;
 }
 .btn-cerrar-mesas:hover{
   background: #bd2130;
@@ -658,7 +734,8 @@ const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.sli
   padding-bottom: 6px;
   margin-bottom: 10px;
 }
-.factura-origen { font-size: 0.9rem; margin-bottom: 5px; }
+.factura-origen { font-size: 0.9rem; margin-bottom: 3px; }
+.factura-cliente { font-size: 0.9rem; margin-bottom: 8px; color: #0d6efd; }
 .factura-items-list { padding-left: 15px; font-size: 0.85rem; margin-bottom: 10px; color: #444; }
 .factura-total { font-size: 1.1rem; border-top: 2px solid #333; padding-top: 5px; display: inline-block; }
 .factura-acciones { display: flex; justify-content: flex-end; margin-top: 10px; border-top: 1px solid #eee; padding-top: 8px; }
@@ -704,6 +781,28 @@ const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.sli
   gap: 10px; 
   position: relative; 
 }
+
+/* DISEÑO DE BOTONES DE SELECCIÓN DE FACTURA */
+.opciones-factura {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 5px;
+}
+.opciones-factura button {
+  padding: 12px;
+  font-size: 0.95rem;
+  font-weight: bold;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.2s ease;
+}
+.btn-opcion-anonimo { background: #e2e3e5; color: #383d41; }
+.btn-opcion-anonimo:hover { background: #d6d8db; }
+.btn-opcion-cliente { background: #cce5ff; color: #004085; }
+.btn-opcion-cliente:hover { background: #b8daff; }
 
 /* BANNER DE NOTIFICACIONES DE ERROR */
 .error-banner {
