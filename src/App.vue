@@ -61,6 +61,7 @@
                 <div v-else class="controles-activas">
                   <button @click="prepararAgregarPedido(mesa.id)" class="btn-pedir">+ Pedido</button>
                   <button @click="facturarMesa(mesa.id)" class="btn-facturar">Facturar</button>
+                  <button @click="cerrarmesa(mesa.id)" class="btn-cerrar-mesas">Cerrar mesa</button>
                 </div>
               </div>
             </div>
@@ -159,7 +160,9 @@ import html2pdf from 'html2pdf.js'
 
 // --- FORMATO DE MONEDA CON PUNTUACIÓN DE MILES ---
 const formatearMoneda = (valor) => {
-  if (valor === undefined || valor === null || isNaN(valor)) return '$0'
+  if (valor === undefined || valor === null || isNaN(valor)) 
+  return '$0'
+
   return new Intl.NumberFormat('es-CO', {
     style: 'currency',
     currency: 'COP',
@@ -377,6 +380,30 @@ const facturarMesa = (mesaId) => {
   
   actualizarLocalStorage()
   irASlide(2)
+}
+
+const cerrarmesa = (mesaId) => {
+  const mesa = listamesas.value.find(m => m.id === mesaId)
+  if (!mesa) return
+
+  // 1. Confirmación de seguridad
+  const seguro = confirm(`¿Estás seguro de cerrar la Mesa ${mesa.numero}? Se cancelarán los pedidos actuales y se devolverá el stock.`)
+  if (!seguro) return
+
+  // 2. Devolver el stock de los productos pedidos al catálogo
+  mesa.pedidos.forEach(pedidoMesa => {
+    const productoCatalogo = listaproductos.value.find(p => p.id === pedidoMesa.id)
+    if (productoCatalogo) {
+      productoCatalogo.cantidad += pedidoMesa.cantidadPedida
+    }
+  })
+
+  // 3. Restablecer las propiedades de la mesa
+  mesa.estado = 'disponible'
+  mesa.pedidos = []
+
+  // 4. Actualizar el almacenamiento local para guardar los cambios
+  actualizarLocalStorage()
 }
 
 const descargarPDF = (factura) => {
@@ -600,6 +627,14 @@ const irASlide = (index) => { if (swiperInstance.value) swiperInstance.value.sli
 .controles-activas { display: flex; gap: 6px; width: 100%; }
 .btn-pedir { background: #ffc107; color: #212529; flex: 1; }
 .btn-facturar { background: #17a2b8; color: white; flex: 1; }
+.btn-cerrar-mesas {
+  background: #dc3545;
+  color: white;
+  flex: 0.5; /* Un poco más pequeño que los otros dos botones */
+}
+.btn-cerrar-mesas:hover{
+  background: #bd2130;
+}
 
 /* HISTORIAL DE FACTURAS */
 .tabla-facturas { 
